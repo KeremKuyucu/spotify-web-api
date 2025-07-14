@@ -45,7 +45,7 @@ export default function SpotifyController() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [currentTrack, setCurrentTrack] = useState<any>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [volume, setVolume] = useState<number>(50) // Tek bir sayı olarak tutulacak
+  const [volume, setVolume] = useState<number>(50)
   const [progressMs, setProgressMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
@@ -56,7 +56,7 @@ export default function SpotifyController() {
   const { toast } = useToast()
   const [showUserAppToken, setShowUserAppToken] = useState(false)
 
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  // Polling intervalini kaldırıyoruz, sadece progress interval kalacak
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const fetchPlaybackState = useCallback(
@@ -92,7 +92,7 @@ export default function SpotifyController() {
 
         setCurrentTrack(data.item)
         setIsPlaying(data.is_playing)
-        setVolume(data.device?.volume_percent || 50) // Volume'u tek sayı olarak ayarla
+        setVolume(data.device?.volume_percent || 50)
         setProgressMs(data.progress_ms || 0)
         setDurationMs(data.item?.duration_ms || 0)
         setActiveDeviceId(data.device?.id || null)
@@ -156,8 +156,8 @@ export default function SpotifyController() {
           setRefreshToken(refresh)
           setUserAppToken(appToken)
           setIsLoggedIn(true)
-          await fetchPlaybackState(token)
-          await fetchAvailableDevices(token)
+          await fetchPlaybackState(token) // Sadece oynatma durumunu başlangıçta çek
+          // fetchAvailableDevices(token) // Cihazları başlangıçta çekmeyi kaldırıyoruz
         } else if (refresh) {
           const refreshRes = await fetch("/api/auth/refresh", {
             method: "POST",
@@ -178,8 +178,8 @@ export default function SpotifyController() {
             setRefreshToken(refresh)
             setUserAppToken(appToken)
             setIsLoggedIn(true)
-            await fetchPlaybackState(refreshData.accessToken)
-            await fetchAvailableDevices(refreshData.accessToken)
+            await fetchPlaybackState(refreshData.accessToken) // Sadece oynatma durumunu başlangıçta çek
+            // fetchAvailableDevices(refreshData.accessToken) // Cihazları başlangıçta çekmeyi kaldırıyoruz
           } else {
             setError("Yenileme token'ı geçersiz veya süresi dolmuş. Lütfen tekrar giriş yapın.")
             handleLogout()
@@ -195,7 +195,7 @@ export default function SpotifyController() {
         setIsInitialLoading(false)
       }
     },
-    [fetchPlaybackState, fetchAvailableDevices],
+    [fetchPlaybackState], // fetchAvailableDevices bağımlılığı kaldırıldı
   )
 
   useEffect(() => {
@@ -231,35 +231,16 @@ export default function SpotifyController() {
     }
   }, [initializeSession])
 
-  // Polling için useEffect
+  // Polling için useEffect'i tamamen kaldırıyoruz.
+  // Sadece progressIntervalRef'in temizlenmesi için bir useEffect bırakabiliriz,
+  // ancak bu zaten handleLogout içinde ve fetchPlaybackState içinde yönetiliyor.
   useEffect(() => {
-    if (isLoggedIn && accessToken) {
-      // Mevcut polling intervalini temizle
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-      }
-      // Her 3 saniyede bir oynatma durumunu kontrol et
-      pollingIntervalRef.current = setInterval(() => {
-        fetchPlaybackState(accessToken)
-      }, 3000)
-    } else {
-      // Çıkış yapıldığında veya oturum açılmadığında polling'i durdur
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-        pollingIntervalRef.current = null
-      }
-    }
-
-    // Component unmount edildiğinde intervali temizle
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-      }
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
       }
     }
-  }, [isLoggedIn, accessToken, fetchPlaybackState])
+  }, [])
 
   const handleLogin = () => {
     window.location.href = "/api/auth/login"
@@ -280,10 +261,11 @@ export default function SpotifyController() {
     setActiveDeviceId(null)
     setProgressMs(0)
     setDurationMs(0)
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
-    }
+    // Polling intervali kaldırıldığı için bu satır artık gereksiz
+    // if (pollingIntervalRef.current) {
+    //   clearInterval(pollingIntervalRef.current)
+    //   pollingIntervalRef.current = null
+    // }
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current)
       progressIntervalRef.current = null
@@ -375,13 +357,15 @@ export default function SpotifyController() {
     if (!res?.ok) {
       setIsPlaying(originalIsPlaying) // Revert on error
     }
-    setTimeout(() => fetchPlaybackState(accessToken!), 500) // Refresh state after action
+    // Eylem sonrası oynatma durumunu güncelle
+    setTimeout(() => fetchPlaybackState(accessToken!), 500)
   }
 
   const skipToNext = async () => {
     setError(null)
     const res = await makeSpotifyApiCall("me/player/next", "POST", { device_id: activeDeviceId })
     if (res?.ok) {
+      // Eylem sonrası oynatma durumunu güncelle
       setTimeout(() => fetchPlaybackState(accessToken!), 1000)
     }
   }
@@ -390,6 +374,7 @@ export default function SpotifyController() {
     setError(null)
     const res = await makeSpotifyApiCall("me/player/previous", "POST", { device_id: activeDeviceId })
     if (res?.ok) {
+      // Eylem sonrası oynatma durumunu güncelle
       setTimeout(() => fetchPlaybackState(accessToken!), 1000)
     }
   }
@@ -402,7 +387,8 @@ export default function SpotifyController() {
       device_id: activeDeviceId,
     })
     if (!res?.ok) {
-      setTimeout(() => fetchPlaybackState(accessToken!), 500) // Revert on error
+      // Hata durumunda, gerçek durumu tekrar çek
+      setTimeout(() => fetchPlaybackState(accessToken!), 500)
     }
   }
 
@@ -414,7 +400,8 @@ export default function SpotifyController() {
       device_id: activeDeviceId,
     })
     if (!res?.ok) {
-      setTimeout(() => fetchPlaybackState(accessToken!), 500) // Revert on error
+      // Hata durumunda, gerçek durumu tekrar çek
+      setTimeout(() => fetchPlaybackState(accessToken!), 500)
     }
   }
 
@@ -427,7 +414,8 @@ export default function SpotifyController() {
       device_id: activeDeviceId,
     })
     if (!res?.ok) {
-      setTimeout(() => fetchPlaybackState(accessToken!), 500) // Revert on error
+      // Hata durumunda, gerçek durumu tekrar çek
+      setTimeout(() => fetchPlaybackState(accessToken!), 500)
     } else {
       // Başarılı olursa, yerel ilerleme intervalini sıfırla ve yeniden başlat
       if (progressIntervalRef.current) {
@@ -454,7 +442,8 @@ export default function SpotifyController() {
       device_id: activeDeviceId,
     })
     if (!res?.ok) {
-      setTimeout(() => fetchPlaybackState(accessToken!), 500) // Revert on error
+      // Hata durumunda, gerçek durumu tekrar çek
+      setTimeout(() => fetchPlaybackState(accessToken!), 500)
     } else {
       // Başarılı olursa, yerel ilerleme intervalini sıfırla ve yeniden başlat
       if (progressIntervalRef.current) {
@@ -483,7 +472,8 @@ export default function SpotifyController() {
     if (!res?.ok) {
       setActiveDeviceId(originalActiveDeviceId) // Revert on error
     }
-    setTimeout(() => fetchPlaybackState(accessToken!), 1000) // Refresh state after action
+    // Eylem sonrası oynatma durumunu güncelle
+    setTimeout(() => fetchPlaybackState(accessToken!), 1000)
   }
 
   const getDeviceIcon = (type: string) => {
@@ -511,6 +501,13 @@ export default function SpotifyController() {
 
   const toggleUserAppTokenVisibility = () => {
     setShowUserAppToken((prev) => !prev)
+  }
+
+  // Cihaz seçme düğmesine tıklandığında cihazları yeniden yükle
+  const handleDeviceDropdownClick = () => {
+    if (accessToken) {
+      fetchAvailableDevices(accessToken)
+    }
   }
 
   if (isInitialLoading) {
@@ -692,7 +689,13 @@ export default function SpotifyController() {
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-full bg-transparent" disabled={isActionLoading}>
+                      {/* Cihaz Seç düğmesine onClick ekledik */}
+                      <Button
+                        variant="outline"
+                        className="w-full bg-transparent"
+                        disabled={isActionLoading}
+                        onClick={handleDeviceDropdownClick} // Buraya eklendi
+                      >
                         Cihaz Seç:{" "}
                         {activeDeviceId
                           ? availableDevices.find((d) => d.id === activeDeviceId)?.name || "Bilinmeyen Cihaz"
@@ -724,7 +727,13 @@ export default function SpotifyController() {
                   deneyin.
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-full mt-4 bg-transparent" disabled={isActionLoading}>
+                      {/* Cihaz Seç düğmesine onClick ekledik */}
+                      <Button
+                        variant="outline"
+                        className="w-full mt-4 bg-transparent"
+                        disabled={isActionLoading}
+                        onClick={handleDeviceDropdownClick} // Buraya eklendi
+                      >
                         Cihaz Seç:{" "}
                         {activeDeviceId
                           ? availableDevices.find((d) => d.id === activeDeviceId)?.name || "Bilinmeyen Cihaz"
