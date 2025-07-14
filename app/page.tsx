@@ -56,8 +56,8 @@ export default function SpotifyController() {
   const { toast } = useToast()
   const [showUserAppToken, setShowUserAppToken] = useState(false)
 
-  // Polling intervalini kaldırıyoruz, sadece progress interval kalacak
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const playerPollingIntervalRef = useRef<NodeJS.Timeout | null>(null) // Oynatma durumu polling'i için yeni ref
 
   const fetchPlaybackState = useCallback(
     async (token: string) => {
@@ -156,8 +156,8 @@ export default function SpotifyController() {
           setRefreshToken(refresh)
           setUserAppToken(appToken)
           setIsLoggedIn(true)
-          await fetchPlaybackState(token) // Sadece oynatma durumunu başlangıçta çek
-          // fetchAvailableDevices(token) // Cihazları başlangıçta çekmeyi kaldırıyoruz
+          // fetchPlaybackState ve fetchAvailableDevices buradan kaldırıldı,
+          // yeni useEffect polling'i yönetecek.
         } else if (refresh) {
           const refreshRes = await fetch("/api/auth/refresh", {
             method: "POST",
@@ -178,8 +178,7 @@ export default function SpotifyController() {
             setRefreshToken(refresh)
             setUserAppToken(appToken)
             setIsLoggedIn(true)
-            await fetchPlaybackState(refreshData.accessToken) // Sadece oynatma durumunu başlangıçta çek
-            // fetchAvailableDevices(refreshData.accessToken) // Cihazları başlangıçta çekmeyi kaldırıyoruz
+            // fetchPlaybackState ve fetchAvailableDevices buradan kaldırıldı.
           } else {
             setError("Yenileme token'ı geçersiz veya süresi dolmuş. Lütfen tekrar giriş yapın.")
             handleLogout()
@@ -195,7 +194,7 @@ export default function SpotifyController() {
         setIsInitialLoading(false)
       }
     },
-    [fetchPlaybackState], // fetchAvailableDevices bağımlılığı kaldırıldı
+    [], // Bağımlılıklar boş bırakıldı, çünkü fetchPlaybackState yeni polling useEffect'i tarafından yönetilecek.
   )
 
   useEffect(() => {
@@ -231,9 +230,28 @@ export default function SpotifyController() {
     }
   }, [initializeSession])
 
-  // Polling için useEffect'i tamamen kaldırıyoruz.
-  // Sadece progressIntervalRef'in temizlenmesi için bir useEffect bırakabiliriz,
-  // ancak bu zaten handleLogout içinde ve fetchPlaybackState içinde yönetiliyor.
+  // Oynatma durumu için 5 saniyelik polling'i yöneten yeni useEffect
+  useEffect(() => {
+    if (isLoggedIn && accessToken) {
+      // Giriş yapıldığında veya token değiştiğinde ilk fetch
+      fetchPlaybackState(accessToken)
+
+      // Her 5 saniyede bir polling ayarla
+      playerPollingIntervalRef.current = setInterval(() => {
+        fetchPlaybackState(accessToken)
+      }, 5000) // 5 saniye (5000 ms)
+    }
+
+    return () => {
+      // Component unmount olduğunda veya bağımlılıklar değiştiğinde intervali temizle
+      if (playerPollingIntervalRef.current) {
+        clearInterval(playerPollingIntervalRef.current)
+        playerPollingIntervalRef.current = null
+      }
+    }
+  }, [isLoggedIn, accessToken, fetchPlaybackState]) // Bağımlılıklar
+
+  // İlerleme çubuğu intervalini temizlemek için mevcut useEffect
   useEffect(() => {
     return () => {
       if (progressIntervalRef.current) {
@@ -261,14 +279,14 @@ export default function SpotifyController() {
     setActiveDeviceId(null)
     setProgressMs(0)
     setDurationMs(0)
-    // Polling intervali kaldırıldığı için bu satır artık gereksiz
-    // if (pollingIntervalRef.current) {
-    //   clearInterval(pollingIntervalRef.current)
-    //   pollingIntervalRef.current = null
-    // }
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current)
       progressIntervalRef.current = null
+    }
+    if (playerPollingIntervalRef.current) {
+      // Çıkış yapıldığında oynatma polling'ini temizle
+      clearInterval(playerPollingIntervalRef.current)
+      playerPollingIntervalRef.current = null
     }
     toast({
       title: "Çıkış Yapıldı",
