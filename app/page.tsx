@@ -524,8 +524,17 @@ export default function SpotifyController() {
 
   // Cihaz seçme düğmesine tıklandığında cihazları yeniden yükle
   const handleDeviceDropdownClick = () => {
+    console.log("Cihaz Seç düğmesine tıklandı.") // Debug log
     if (accessToken) {
+      console.log("AccessToken mevcut, cihazlar getiriliyor...") // Debug log
       fetchAvailableDevices(accessToken)
+    } else {
+      console.log("AccessToken mevcut değil, cihazlar getirilemiyor.") // Debug log
+      toast({
+        title: "Hata",
+        description: "Cihazları listelemek için lütfen giriş yapın.",
+        variant: "destructive",
+      })
     }
   }
 
